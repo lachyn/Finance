@@ -108,17 +108,19 @@ class DataCache:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Připrav data pro vložení
+        # Připrav data pro vložení - používej .at pro scalar přístup
         data_to_insert = []
-        for date, row in df.iterrows():
+        for i in range(len(df)):
+            date_val = df.index[i]
+            date_str = date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)[:10]
             data_to_insert.append((
                 symbol,
-                date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date)[:10],
-                float(row['Open']),
-                float(row['High']),
-                float(row['Low']),
-                float(row['Close']),
-                int(row['Volume'])
+                date_str,
+                float(df.iloc[i, df.columns.get_loc('Open')]),
+                float(df.iloc[i, df.columns.get_loc('High')]),
+                float(df.iloc[i, df.columns.get_loc('Low')]),
+                float(df.iloc[i, df.columns.get_loc('Close')]),
+                int(df.iloc[i, df.columns.get_loc('Volume')])
             ))
         
         # INSERT OR REPLACE (aktualizuj, pokud existuje)
@@ -279,22 +281,32 @@ def calculate_next_day_gap_up(df, extreme_drops):
     """
     results = []
     
+    # Sloupce indexy pro rychlejší přístup
+    close_idx = df.columns.get_loc('Close')
+    open_idx = df.columns.get_loc('Open')
+    drop_idx = df.columns.get_loc('Daily_Return')
+    
     for idx in extreme_drops.index:
         if idx == df.index[-1]:  # Poslední den nemá následující den
             continue
         
-        next_idx = df.index.get_loc(idx) + 1
-        if next_idx < len(df):
-            next_day = df.iloc[next_idx]
-            current_close = df.loc[idx, 'Close']
-            next_open = next_day['Open']
+        current_loc = df.index.get_loc(idx)
+        next_loc = current_loc + 1
+        
+        if next_loc < len(df):
+            next_idx = df.index[next_loc]
+            
+            # Používej .iloc s integer pozicí pro scalar přístup
+            current_close = float(df.iloc[current_loc, close_idx])
+            next_open = float(df.iloc[next_loc, open_idx])
+            drop_return = float(df.iloc[current_loc, drop_idx])
             
             gap_up = next_open > current_close
             gap_percent = ((next_open - current_close) / current_close) * 100
             
             results.append({
-                'Date': idx.date(),
-                'Drop_Return': df.loc[idx, 'Daily_Return'],
+                'Date': idx.date() if hasattr(idx, 'date') else str(idx)[:10],
+                'Drop_Return': drop_return,
                 'Next_Gap_Percent': gap_percent,
                 'Gap_Up': gap_up
             })

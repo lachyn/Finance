@@ -249,8 +249,10 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
 
 
 def calculate_daily_return(df):
-    """Vypočítá denní procentuální změnu."""
-    df['Daily_Return'] = ((df['Close'] - df['Open']) / df['Open']) * 100
+    """Vypočítá denní procentuální změnu (Close vs Prev Close)."""
+    # Standardní denní změna (Close / PrevClose - 1)
+    # Zachytí i gapy dolů přes noc, nejen intraday pokles
+    df['Daily_Return'] = ((df['Close'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
     df['Gap'] = ((df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
     return df
 

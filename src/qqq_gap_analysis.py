@@ -221,70 +221,94 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
     end_date = today + timedelta(days=1)
     start_date = end_date - timedelta(days=365 * years)
     
-    df_history = None
+    # Zahrneme i dnešek (yfinance end je exkluzivní, takže +1 den)
+    today = datetime.now().date()
+    end_date = today + timedelta(days=1)
+    start_date = end_date - timedelta(days=365 * years)
+    
+    dfs_to_merge = []
     download_start = start_date
 
     # Pokus se získat z cache
     if use_cache:
         metadata = cache.get_metadata(symbol)
-        is_cache_fresh = False
         
         if metadata:
+            cache_start = datetime.strptime(metadata['start_date'], '%Y-%m-%d').date()
             last_updated = datetime.fromisoformat(metadata['last_updated'])
-            # Pokud je cache mladší než 1 hodina, považujeme ji za čerstvou i pro dnešek
-            if datetime.now() - last_updated < timedelta(hours=1):
-                is_cache_fresh = True
-                print(f"Cache je čerstvá (aktualizováno: {last_updated.strftime('%H:%M:%S')}).")
-        
-        if is_cache_fresh:
-            # Načti kompletní cache včetně dneška
-            print(f"Načítám kompletní data z cache...")
-            return cache.get_cached_data(symbol, start_date, end_date)
             
-        # Pokud cache není čerstvá, použijeme "safe history" logiku
-        # Ignorujeme poslední 2 dny v cache, abychom vynutili čerstvé stažení
-        safe_history_date = today - timedelta(days=2)
-        
-        print(f"Kontrola cache pro {symbol} (historie do {safe_history_date})...")
-        df_history = cache.get_cached_data(symbol, start_date, safe_history_date)
-        
-        if df_history is not None and not df_history.empty:
-            print(f"Načteno {len(df_history)} historických dnů z cache")
-            # Stahujeme od následujícího dne po konci historie
-            download_start = df_history.index[-1].date() + timedelta(days=1)
-        else:
-            print("Cache neobsahuje relevantní historii, stahuji vše.")
-            download_start = start_date
+            # 1. BACKFILL: Kontrola chybějící historie
+            if start_date < cache_start:
+                print(f"Cache neobsahuje starší historii (začíná {cache_start}).")
+                print(f"Stahuji chybějící historii od {start_date} do {cache_start}...")
+                
+                df_backfill = yf.download(symbol, start=start_date, end=cache_start, progress=False, auto_adjust=True)
+                if isinstance(df_backfill.columns, pd.MultiIndex):
+                    df_backfill.columns = df_backfill.columns.get_level_values(0)
+                
+                if not df_backfill.empty:
+                    print(f"Staženo {len(df_backfill)} historických dnů.")
+                    dfs_to_merge.append(df_backfill)
+            
+            # 2. FRESHNESS CHECK
+            is_recent_fresh = (datetime.now() - last_updated < timedelta(hours=1))
+            
+            # Pokud je cache čerstvá a nemáme backfill, vrátíme ji rovnou
+            if is_recent_fresh and not dfs_to_merge:
+                print(f"Cache je čerstvá a kompletní (aktualizováno: {last_updated.strftime('%H:%M:%S')}).")
+                print(f"Načítám kompletní data z cache...")
+                return cache.get_cached_data(symbol, start_date, end_date)
+            
+            # 3. LOAD CACHE (Middle part)
+            # Načteme bezpečnou historii z cache
+            safe_history_date = today - timedelta(days=2)
+            
+            # Pokud jsme dělali backfill, chceme cache od jejího začátku
+            # Pokud ne, chceme cache od start_date
+            cache_query_start = max(start_date, cache_start)
+            
+            if cache_query_start < safe_history_date:
+                print(f"Načítám data z cache (do {safe_history_date})...")
+                df_cache = cache.get_cached_data(symbol, cache_query_start, safe_history_date)
+                
+                if df_cache is not None and not df_cache.empty:
+                    print(f"Načteno {len(df_cache)} dnů z cache.")
+                    dfs_to_merge.append(df_cache)
+                    # Další stahování začne po konci cache
+                    download_start = df_cache.index[-1].date() + timedelta(days=1)
+                else:
+                    # Cache vrátila prázdno? Stáhneme vše od začátku (pokud nebyl backfill)
+                    if not dfs_to_merge:
+                        download_start = start_date
+            else:
+                # Cache je příliš krátká/nová, stahujeme vše
+                if not dfs_to_merge:
+                    download_start = start_date
 
-    # Stáhni chybějící/čerstvá data z Yahoo Finance
+    # 4. FORWARD FILL (Recent data)
     if download_start < end_date:
-        print(f"Stahování dat {symbol} z Yahoo Finance od {download_start} do {end_date}...")
+        print(f"Stahování nových dat od {download_start} do {end_date}...")
         df_fresh = yf.download(symbol, start=download_start, end=end_date, progress=False, auto_adjust=True)
         
-        # Fix pro yfinance multi-index columns
         if isinstance(df_fresh.columns, pd.MultiIndex):
             df_fresh.columns = df_fresh.columns.get_level_values(0)
         
         if not df_fresh.empty:
-            print(f"Staženo {len(df_fresh)} nových/čerstvých dnů")
+            print(f"Staženo {len(df_fresh)} nových dnů.")
+            dfs_to_merge.append(df_fresh)
             
-            # Ulož čerstvá data do cache (aktualizuje existující záznamy)
-            if use_cache:
-                cache.save_data(symbol, df_fresh)
-            
-            # Spojení historie a čerstvých dat
-            if df_history is not None:
-                # Konkatenace a odstranění případných duplicit
-                qqq = pd.concat([df_history, df_fresh])
-                qqq = qqq[~qqq.index.duplicated(keep='last')]
-                return qqq
-            else:
-                return df_fresh
-    
-    # Pokud nebylo třeba nic stahovat (nepravděpodobné díky logice safe_date)
-    if df_history is not None:
-        return df_history
+    # 5. MERGE & SAVE
+    if dfs_to_merge:
+        full_df = pd.concat(dfs_to_merge)
+        # Odstranění duplicit (pro jistotu)
+        full_df = full_df[~full_df.index.duplicated(keep='last')]
+        full_df.sort_index(inplace=True)
         
+        if use_cache:
+            cache.save_data(symbol, full_df)
+            
+        return full_df
+    
     raise ValueError("Nepodařilo se získat žádná data")
 
 
@@ -659,6 +683,24 @@ def main():
     if args.clear_cache:
         cache.clear_cache(args.symbol)
         return
+    
+    # Výpis parametrů spuštění
+    print("\n" + "="*70)
+    print(f"SPUŠTĚNÍ ANALÝZY: {args.symbol}")
+    print("="*70)
+    print(f"  Symbol:          {args.symbol}")
+    print(f"  Období:          {args.years} let")
+    
+    if args.threshold:
+        print(f"  Kritérium:       Pevný práh < {args.threshold}%")
+    elif args.percentile:
+        print(f"  Kritérium:       {args.percentile}. percentil nejhorších propadů")
+    else:
+        print(f"  Kritérium:       Výchozí práh < -3.0%")
+        
+    print(f"  Cache:           {'Vypnuta' if args.no_cache else 'Zapnuta'}")
+    print(f"  Uložení CSV:     {'Ano' if args.save else 'Ne'}")
+    print("-" * 70 + "\n")
     
     # Stažení dat
     qqq = download_qqq_data(

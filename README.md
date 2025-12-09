@@ -32,6 +32,12 @@ Skript používá následující logiku pro výpočty:
    - Používá **Wilsonovo konfidenční pásmo (95%)** pro výpočet intervalu spolehlivosti pravděpodobnosti.
    - To je přesnější než běžný průměr, zejména u menšího počtu vzorků (např. < 30 případů).
 
+5. **Pokročilé metriky pro rozhodování:**
+   - **RVOL (Relative Volume):** Poměr aktuálního objemu k 20dennímu průměru.
+     - *Interpretace:* Extrémní objem (> 2.0x) často značí kapitulaci (možný odraz/Long). Nižší objem u propadu spíše značí pokračování trendu (Short).
+   - **Close Location Value (CLV):** Kde v rámci denního rozpětí cena zavřela (0 = Low, 1 = High).
+     - *Interpretace:* Hodnoty < 0.10 značí silný prodejní tlak do konce dne (vhodné pro Short). Hodnoty > 0.20 mohou naznačovat vybírání zisků shortaři (možný odraz).
+
 ## Struktura projektu
 
 ```

@@ -250,11 +250,22 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
 
 
 def calculate_daily_return(df):
-    """Vypočítá denní procentuální změnu (Close vs Prev Close)."""
+    """Vypočítá denní procentuální změnu a další technické indikátory."""
     # Standardní denní změna (Close / PrevClose - 1)
-    # Zachytí i gapy dolů přes noc, nejen intraday pokles
     df['Daily_Return'] = ((df['Close'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
     df['Gap'] = ((df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
+    
+    # 1. Relative Volume (RVOL) - poměr aktuálního objemu k 20dennímu průměru
+    df['Vol_Avg_20'] = df['Volume'].rolling(window=20).mean()
+    df['RVOL'] = df['Volume'] / df['Vol_Avg_20']
+    
+    # 2. Close Location Value (CLV) - kde v rámci dne jsme zavřeli (0=Low, 1=High)
+    # (Close - Low) / (High - Low)
+    # Nízká hodnota (< 0.2) znamená, že prodejci tlačili až do konce -> Bearish
+    range_len = df['High'] - df['Low']
+    # Ošetření dělení nulou
+    df['Close_Loc'] = np.where(range_len == 0, 0.5, (df['Close'] - df['Low']) / range_len)
+    
     return df
 
 
@@ -311,12 +322,18 @@ def calculate_next_day_gap_up(df, extreme_drops):
             next_open = next_row['Open'].item() if hasattr(next_row['Open'], 'item') else float(next_row['Open'])
             drop_return = current_row['Daily_Return'].item() if hasattr(current_row['Daily_Return'], 'item') else float(current_row['Daily_Return'])
             
+            # Nové metriky
+            rvol = current_row['RVOL'].item() if hasattr(current_row['RVOL'], 'item') else float(current_row['RVOL'])
+            close_loc = current_row['Close_Loc'].item() if hasattr(current_row['Close_Loc'], 'item') else float(current_row['Close_Loc'])
+            
             gap_up = next_open > current_close
             gap_percent = ((next_open - current_close) / current_close) * 100
             
             results.append({
                 'Date': idx.date() if hasattr(idx, 'date') else str(idx)[:10],
                 'Drop_Return': drop_return,
+                'RVOL': rvol,
+                'Close_Loc': close_loc,
                 'Next_Gap_Percent': gap_percent,
                 'Gap_Up': gap_up
             })
@@ -432,6 +449,24 @@ def analyze_results(gap_results):
     print(f"  Nejhorší propád: {gap_results['Drop_Return'].min():.2f}%")
     print(f"  Nejlepší propád: {gap_results['Drop_Return'].max():.2f}%")
     
+    print(f"\nAnalýza faktorů (Průměrné hodnoty):")
+    print(f"{'Metrika':<15} | {'Gap UP Dny':<12} | {'Gap DOWN Dny':<12} | {'Rozdíl':<10}")
+    print("-" * 55)
+    
+    # Rozděl data
+    up_days = gap_results[gap_results['Gap_Up'] == True]
+    down_days = gap_results[gap_results['Gap_Up'] == False]
+    
+    # RVOL
+    rvol_up = up_days['RVOL'].mean() if not up_days.empty else 0
+    rvol_down = down_days['RVOL'].mean() if not down_days.empty else 0
+    print(f"{'RVOL':<15} | {rvol_up:<12.2f} | {rvol_down:<12.2f} | {rvol_up-rvol_down:+.2f}")
+    
+    # Close Location
+    loc_up = up_days['Close_Loc'].mean() if not up_days.empty else 0
+    loc_down = down_days['Close_Loc'].mean() if not down_days.empty else 0
+    print(f"{'Close Loc (0-1)':<15} | {loc_up:<12.2f} | {loc_down:<12.2f} | {loc_up-loc_down:+.2f}")
+    
     print("\n" + "="*70)
     print("Prvních 10 případů:")
     print("="*70)
@@ -467,6 +502,8 @@ def print_current_status(df, cutoff, stats):
     # Získej hodnoty bezpečně (scalar)
     last_close = last_row['Close']
     last_drop = last_row['Daily_Return']
+    last_rvol = last_row['RVOL'] if 'RVOL' in last_row else 0
+    last_loc = last_row['Close_Loc'] if 'Close_Loc' in last_row else 0.5
     
     print("\n" + "="*70)
     print(f"AKTUÁLNÍ STAV TRHU ({last_date.strftime('%Y-%m-%d')})")
@@ -475,6 +512,8 @@ def print_current_status(df, cutoff, stats):
     print(f"  Cena Close:      {last_close:.2f}")
     print(f"  Dnešní změna:    {last_drop:.2f}%")
     print(f"  Signální práh:   {cutoff:.2f}%")
+    print(f"  RVOL (Objem):    {last_rvol:.2f}x")
+    print(f"  Close Loc:       {last_loc:.2f} (0=Low, 1=High)")
     
     is_signal = last_drop < cutoff
     
@@ -483,7 +522,32 @@ def print_current_status(df, cutoff, stats):
         print(f"  --------------------------------------------------")
         print(f"  Historická pravděpodobnost Gap Up zítra: {stats['probability']:.2f}%")
         print(f"  95% Interval spolehlivosti: [{stats['ci_lower']:.2f}% - {stats['ci_upper']:.2f}%]")
-        print(f"  Průměrný historický gap: {stats['avg_gap']:.2f}%")
+        
+        print(f"\n  STRATEGICKÉ VYHODNOCENÍ (SHORT vs BOUNCE):")
+        print(f"  ------------------------------------------")
+        
+        # Logika pro vyhodnocení situace
+        # Short setup: Zavíráme na dně a není to extrémní kapitulace
+        short_cond = last_loc < 0.15 and last_rvol < 2.0
+        # Bounce setup: Už se to zvedá ode dna nebo je to masivní kapitulace
+        bounce_cond = last_loc > 0.25 or last_rvol > 2.5
+        
+        if short_cond:
+            print("  🔴 SHORT SETUP (Pravděpodobné pokračování poklesu)")
+            print("     Důvody:")
+            print(f"     1. Close Location {last_loc:.2f} < 0.15 (Prodejci tlačí do konce)")
+            print(f"     2. RVOL {last_rvol:.2f} není extrémní (Není to kapitulace)")
+        elif bounce_cond:
+            print("  🟢 BOUNCE SETUP (Možný odraz / Gap Up)")
+            print("     Důvody:")
+            if last_loc > 0.25:
+                print(f"     1. Close Location {last_loc:.2f} > 0.25 (Někdo už nakupuje)")
+            if last_rvol > 2.5:
+                print(f"     2. RVOL {last_rvol:.2f} je extrémní (Kapitulace)")
+        else:
+            print("  ⚪ NEUTRÁLNÍ / NEJASNÝ SIGNÁL")
+            print("     - Metriky jsou smíšené, čekej na jasnější potvrzení.")
+            
     else:
         diff = last_drop - cutoff
         print(f"\n  Signál není aktivní. (Chybí {diff:.2f}% k dosažení prahu)")

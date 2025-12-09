@@ -216,7 +216,8 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
     if cache is None:
         cache = DataCache()
     
-    end_date = datetime.now().date()
+    # Zahrneme i dnešek (yfinance end je exkluzivní, takže +1 den)
+    end_date = datetime.now().date() + timedelta(days=1)
     start_date = end_date - timedelta(days=365 * years)
     
     # Pokus se získat z cache
@@ -267,12 +268,15 @@ def identify_extreme_drops(df, threshold=None, percentile=None):
         percentile: Percentil (např. 5 pro 5. percentil nejhorších poklesů)
     
     Returns:
-        DataFrame s filtrovanými denními propady
+        (DataFrame, float) - Filtrovaná data a použitý práh
     """
     if threshold is None and percentile is None:
         threshold = -3.0  # výchozí práh
     
+    cutoff = 0.0
+    
     if threshold is not None:
+        cutoff = threshold
         extreme_drops = df[df['Daily_Return'] < threshold].copy()
         print(f"\nIdentifikováno {len(extreme_drops)} dnů s propadem < {threshold}%")
     else:
@@ -281,7 +285,7 @@ def identify_extreme_drops(df, threshold=None, percentile=None):
         extreme_drops = df[df['Daily_Return'] <= cutoff].copy()
         print(f"\nIdentifikováno {len(extreme_drops)} dnů ({percentile}. percentil, práh {cutoff:.2f}%)")
     
-    return extreme_drops
+    return extreme_drops, cutoff
 
 
 def calculate_next_day_gap_up(df, extreme_drops):
@@ -452,6 +456,39 @@ def analyze_results(gap_results):
     return gap_results
 
 
+def print_current_status(df, cutoff, stats):
+    """Vytiskne informaci o aktuálním stavu trhu."""
+    if df is None or df.empty:
+        return
+
+    last_date = df.index[-1]
+    last_row = df.iloc[-1]
+    
+    # Získej hodnoty bezpečně (scalar)
+    last_close = last_row['Close']
+    last_drop = last_row['Daily_Return']
+    
+    print("\n" + "="*70)
+    print(f"AKTUÁLNÍ STAV TRHU ({last_date.strftime('%Y-%m-%d')})")
+    print("="*70)
+    
+    print(f"  Cena Close:      {last_close:.2f}")
+    print(f"  Dnešní změna:    {last_drop:.2f}%")
+    print(f"  Signální práh:   {cutoff:.2f}%")
+    
+    is_signal = last_drop < cutoff
+    
+    if is_signal:
+        print("\n  ⚠️  SIGNÁL AKTIVNÍ! TRH JE V EXTRÉMNÍM PROPADU ⚠️")
+        print(f"  --------------------------------------------------")
+        print(f"  Historická pravděpodobnost Gap Up zítra: {stats['probability']:.2f}%")
+        print(f"  95% Interval spolehlivosti: [{stats['ci_lower']:.2f}% - {stats['ci_upper']:.2f}%]")
+        print(f"  Průměrný historický gap: {stats['avg_gap']:.2f}%")
+    else:
+        diff = last_drop - cutoff
+        print(f"\n  Signál není aktivní. (Chybí {diff:.2f}% k dosažení prahu)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Analýza pravděpodobnosti gap up po extrémních propadech QQQ'
@@ -532,7 +569,7 @@ def main():
     qqq = calculate_daily_return(qqq)
     
     # Identifikace extrémních propadů
-    extreme_drops = identify_extreme_drops(
+    extreme_drops, cutoff = identify_extreme_drops(
         qqq,
         threshold=args.threshold,
         percentile=args.percentile
@@ -543,6 +580,10 @@ def main():
     
     # Výpočet a zobrazení výsledků
     results_df = analyze_results(gap_results)
+    
+    # Zobrazení aktuálního stavu
+    if results_df is not None and hasattr(results_df, 'attrs') and 'stats' in results_df.attrs:
+        print_current_status(qqq, cutoff, results_df.attrs['stats'])
     
     # Uložení výsledků
     if args.save and results_df is not None:

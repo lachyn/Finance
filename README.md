@@ -13,6 +13,25 @@ Skript stahuje posledních 5 let denních dat QQQ, identifikuje extrémní denn�
 - 95% Wilsonovo konfidenční pásmo pro přesnější odhad
 - Export výsledků do CSV
 
+## Metodika výpočtu
+
+Skript používá následující logiku pro výpočty:
+
+1. **Denní propad (Daily Drop):**
+   - Počítá se jako celková denní změna: `(Close - PrevClose) / PrevClose`
+   - Tento způsob zahrnuje i noční gapy dolů, což lépe reflektuje celkovou ztrátu hodnoty než jen intraday pohyb.
+
+2. **Extrémní propad:**
+   - Filtruje dny, kdy byl denní propad nižší než zadaný práh (např. -3%) nebo patří do nejhoršího percentilu (např. 5. percentil).
+
+3. **Gap Up (Následující den):**
+   - Podmínka: `NextOpen > CurrentClose`
+   - Zjišťuje, zda trh následující den otevřel výše, než kde předchozí den zavřel (tzv. "mean reversion" efekt).
+
+4. **Statistická významnost:**
+   - Používá **Wilsonovo konfidenční pásmo (95%)** pro výpočet intervalu spolehlivosti pravděpodobnosti.
+   - To je přesnější než běžný průměr, zejména u menšího počtu vzorků (např. < 30 případů).
+
 ## Struktura projektu
 
 ```

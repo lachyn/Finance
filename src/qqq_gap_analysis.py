@@ -217,36 +217,75 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
         cache = DataCache()
     
     # Zahrneme i dnešek (yfinance end je exkluzivní, takže +1 den)
-    end_date = datetime.now().date() + timedelta(days=1)
+    today = datetime.now().date()
+    end_date = today + timedelta(days=1)
     start_date = end_date - timedelta(days=365 * years)
     
+    df_history = None
+    download_start = start_date
+
     # Pokus se získat z cache
     if use_cache:
-        print(f"Kontrola cache pro {symbol}...")
-        cached_data = cache.get_cached_data(symbol, start_date, end_date)
+        metadata = cache.get_metadata(symbol)
+        is_cache_fresh = False
         
-        if cached_data is not None and len(cached_data) > 0:
-            metadata = cache.get_metadata(symbol)
-            print(f"Data nalezena v cache (aktualizováno: {metadata['last_updated'][:10]})")
-            print(f"Načteno {len(cached_data)} obchodních dnů z cache")
-            return cached_data
+        if metadata:
+            last_updated = datetime.fromisoformat(metadata['last_updated'])
+            # Pokud je cache mladší než 1 hodina, považujeme ji za čerstvou i pro dnešek
+            if datetime.now() - last_updated < timedelta(hours=1):
+                is_cache_fresh = True
+                print(f"Cache je čerstvá (aktualizováno: {last_updated.strftime('%H:%M:%S')}).")
+        
+        if is_cache_fresh:
+            # Načti kompletní cache včetně dneška
+            print(f"Načítám kompletní data z cache...")
+            return cache.get_cached_data(symbol, start_date, end_date)
+            
+        # Pokud cache není čerstvá, použijeme "safe history" logiku
+        # Ignorujeme poslední 2 dny v cache, abychom vynutili čerstvé stažení
+        safe_history_date = today - timedelta(days=2)
+        
+        print(f"Kontrola cache pro {symbol} (historie do {safe_history_date})...")
+        df_history = cache.get_cached_data(symbol, start_date, safe_history_date)
+        
+        if df_history is not None and not df_history.empty:
+            print(f"Načteno {len(df_history)} historických dnů z cache")
+            # Stahujeme od následujícího dne po konci historie
+            download_start = df_history.index[-1].date() + timedelta(days=1)
+        else:
+            print("Cache neobsahuje relevantní historii, stahuji vše.")
+            download_start = start_date
+
+    # Stáhni chybějící/čerstvá data z Yahoo Finance
+    if download_start < end_date:
+        print(f"Stahování dat {symbol} z Yahoo Finance od {download_start} do {end_date}...")
+        df_fresh = yf.download(symbol, start=download_start, end=end_date, progress=False, auto_adjust=True)
+        
+        # Fix pro yfinance multi-index columns
+        if isinstance(df_fresh.columns, pd.MultiIndex):
+            df_fresh.columns = df_fresh.columns.get_level_values(0)
+        
+        if not df_fresh.empty:
+            print(f"Staženo {len(df_fresh)} nových/čerstvých dnů")
+            
+            # Ulož čerstvá data do cache (aktualizuje existující záznamy)
+            if use_cache:
+                cache.save_data(symbol, df_fresh)
+            
+            # Spojení historie a čerstvých dat
+            if df_history is not None:
+                # Konkatenace a odstranění případných duplicit
+                qqq = pd.concat([df_history, df_fresh])
+                qqq = qqq[~qqq.index.duplicated(keep='last')]
+                return qqq
+            else:
+                return df_fresh
     
-    # Stáhni z Yahoo Finance
-    print(f"\nStahování dat {symbol} z Yahoo Finance od {start_date} do {end_date}...")
-    qqq = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
-    
-    if qqq.empty:
-        raise ValueError("Nepodařilo se stáhnout data z Yahoo Finance")
-    
-    print(f"Staženo {len(qqq)} obchodních dnů z Yahoo Finance")
-    
-    # Ulož do cache
-    if use_cache:
-        print("Ukládání do cache...")
-        cache.save_data(symbol, qqq)
-        print("Data uložena do cache")
-    
-    return qqq
+    # Pokud nebylo třeba nic stahovat (nepravděpodobné díky logice safe_date)
+    if df_history is not None:
+        return df_history
+        
+    raise ValueError("Nepodařilo se získat žádná data")
 
 
 def calculate_daily_return(df):

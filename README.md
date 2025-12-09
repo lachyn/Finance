@@ -27,7 +27,9 @@ Finance/
 │   ├── setup.sh          # Setup na macOS/Linux
 │   ├── activate.ps1      # Aktivace na Windows
 │   └── activate.sh       # Aktivace na macOS/Linux
+├── run.bat                # Windows batch runner
 ├── requirements.txt       # Závislosti
+├── .gitignore            # Git ignore (DB, CSV výstupy)
 └── README.md
 ```
 
@@ -79,12 +81,25 @@ pip install -r requirements.txt
 
 ### Výchozí nastavení (-3% práh, 5 let dat)
 
+Windows:
+```powershell
+.\run.bat
+```
+
+Linux/macOS:
 ```bash
 python src/qqq_gap_analysis.py
 ```
 
 ### Vlastní procentuální práh
 
+Windows:
+```powershell
+.\run.bat --threshold -2.5
+.\run.bat --threshold -5.0
+```
+
+Linux/macOS:
 ```bash
 python src/qqq_gap_analysis.py --threshold -2.5
 python src/qqq_gap_analysis.py --threshold -5.0
@@ -92,6 +107,13 @@ python src/qqq_gap_analysis.py --threshold -5.0
 
 ### Podle percentilu
 
+Windows:
+```powershell
+.\run.bat --percentile 5
+.\run.bat --percentile 10
+```
+
+Linux/macOS:
 ```bash
 python src/qqq_gap_analysis.py --percentile 5
 python src/qqq_gap_analysis.py --percentile 10
@@ -99,6 +121,13 @@ python src/qqq_gap_analysis.py --percentile 10
 
 ### Jiný počet let
 
+Windows:
+```powershell
+.\run.bat --years 10
+.\run.bat --years 1 --threshold -3.0
+```
+
+Linux/macOS:
 ```bash
 python src/qqq_gap_analysis.py --years 10
 python src/qqq_gap_analysis.py --years 1 --threshold -3.0
@@ -106,6 +135,13 @@ python src/qqq_gap_analysis.py --years 1 --threshold -3.0
 
 ### Uložení výsledků do CSV
 
+Windows:
+```powershell
+.\run.bat --threshold -3.0 --save
+.\run.bat --percentile 5 --save --years 10
+```
+
+Linux/macOS:
 ```bash
 python src/qqq_gap_analysis.py --threshold -3.0 --save
 python src/qqq_gap_analysis.py --percentile 5 --save --years 10
@@ -136,6 +172,22 @@ Skript automaticky ukládá stažená data do lokální SQLite databáze (`marke
 
 ### Příkazy pro správu cache:
 
+Windows:
+```powershell
+# Zobrazí informace o cache pro QQQ
+.\run.bat --cache-info
+
+# Vymaže cache pro QQQ
+.\run.bat --clear-cache
+
+# Vymaže cache a načte nová data z Yahoo Finance
+.\run.bat --clear-cache --no-cache
+
+# Bez použití cache (vždy stahuje z Yahoo Finance)
+.\run.bat --no-cache
+```
+
+Linux/macOS:
 ```bash
 # Zobrazí informace o cache pro QQQ
 python src/qqq_gap_analysis.py --cache-info

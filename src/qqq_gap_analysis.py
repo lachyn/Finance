@@ -7,6 +7,10 @@ from datetime import datetime, timedelta
 import sqlite3
 import os
 from pathlib import Path
+import warnings
+
+# Potlač FutureWarningy
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 
 class DataCache:
@@ -108,19 +112,22 @@ class DataCache:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Připrav data pro vložení - používej .at pro scalar přístup
+        # Připrav data pro vložení - konvertuj na python scalary
         data_to_insert = []
+        
         for i in range(len(df)):
             date_val = df.index[i]
             date_str = date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)[:10]
+            row = df.iloc[i]
+            # Převeď na python scalary pomocí astype nebo item()
             data_to_insert.append((
                 symbol,
                 date_str,
-                float(df.iloc[i, df.columns.get_loc('Open')]),
-                float(df.iloc[i, df.columns.get_loc('High')]),
-                float(df.iloc[i, df.columns.get_loc('Low')]),
-                float(df.iloc[i, df.columns.get_loc('Close')]),
-                int(df.iloc[i, df.columns.get_loc('Volume')])
+                float(row['Open']),
+                float(row['High']),
+                float(row['Low']),
+                float(row['Close']),
+                int(row['Volume'])
             ))
         
         # INSERT OR REPLACE (aktualizuj, pokud existuje)
@@ -225,7 +232,7 @@ def download_qqq_data(symbol='QQQ', years=5, use_cache=True, cache=None):
     
     # Stáhni z Yahoo Finance
     print(f"\nStahování dat {symbol} z Yahoo Finance od {start_date} do {end_date}...")
-    qqq = yf.download(symbol, start=start_date, end=end_date, progress=False)
+    qqq = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
     
     if qqq.empty:
         raise ValueError("Nepodařilo se stáhnout data z Yahoo Finance")
@@ -281,11 +288,6 @@ def calculate_next_day_gap_up(df, extreme_drops):
     """
     results = []
     
-    # Sloupce indexy pro rychlejší přístup
-    close_idx = df.columns.get_loc('Close')
-    open_idx = df.columns.get_loc('Open')
-    drop_idx = df.columns.get_loc('Daily_Return')
-    
     for idx in extreme_drops.index:
         if idx == df.index[-1]:  # Poslední den nemá následující den
             continue
@@ -294,12 +296,14 @@ def calculate_next_day_gap_up(df, extreme_drops):
         next_loc = current_loc + 1
         
         if next_loc < len(df):
-            next_idx = df.index[next_loc]
+            # Použij .iloc pro řádek - automaticky vrací scalar nebo Series
+            current_row = df.iloc[current_loc]
+            next_row = df.iloc[next_loc]
             
-            # Používej .iloc s integer pozicí pro scalar přístup
-            current_close = float(df.iloc[current_loc, close_idx])
-            next_open = float(df.iloc[next_loc, open_idx])
-            drop_return = float(df.iloc[current_loc, drop_idx])
+            # .item() vynucuje konverzi na python scalar bez warningů
+            current_close = current_row['Close'].item() if hasattr(current_row['Close'], 'item') else float(current_row['Close'])
+            next_open = next_row['Open'].item() if hasattr(next_row['Open'], 'item') else float(next_row['Open'])
+            drop_return = current_row['Daily_Return'].item() if hasattr(current_row['Daily_Return'], 'item') else float(current_row['Daily_Return'])
             
             gap_up = next_open > current_close
             gap_percent = ((next_open - current_close) / current_close) * 100

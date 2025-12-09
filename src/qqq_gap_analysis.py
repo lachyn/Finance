@@ -393,6 +393,63 @@ def export_results_to_csv(gap_results, threshold=None, percentile=None, years=No
     return filename
 
 
+def analyze_results(gap_results):
+    """Analyzuje výsledky a vypočítá statistiku."""
+    if len(gap_results) == 0:
+        print("Žádné relevantní následující dny pro analýzu.")
+        return
+    
+    total_days = len(gap_results)
+    gap_up_days = gap_results['Gap_Up'].sum()
+    
+    point_est, lower, upper = wilson_confidence_interval(gap_up_days, total_days)
+    
+    print("\n" + "="*70)
+    print("VÝSLEDKY ANALÝZY")
+    print("="*70)
+    print(f"\nPo extrémních propadech:")
+    print(f"  Celkový počet případ: {total_days}")
+    print(f"  Dnů s gapem nahoru: {gap_up_days}")
+    print(f"  Dnů bez gapu nahoru: {total_days - gap_up_days}")
+    
+    print(f"\nPravděpodobnost gap up:")
+    print(f"  Bodový odhad: {point_est*100:.2f}%")
+    print(f"  95% Wilsonovo CI: [{lower*100:.2f}%, {upper*100:.2f}%]")
+    
+    print(f"\nStatistika gapů:")
+    print(f"  Průměrný gap: {gap_results['Next_Gap_Percent'].mean():.2f}%")
+    print(f"  Medián gapu: {gap_results['Next_Gap_Percent'].median():.2f}%")
+    print(f"  Std. dev gapu: {gap_results['Next_Gap_Percent'].std():.2f}%")
+    
+    print(f"\nStatistika propadů:")
+    print(f"  Průměrný propád: {gap_results['Drop_Return'].mean():.2f}%")
+    print(f"  Nejhorší propád: {gap_results['Drop_Return'].min():.2f}%")
+    print(f"  Nejlepší propád: {gap_results['Drop_Return'].max():.2f}%")
+    
+    print("\n" + "="*70)
+    print("Prvních 10 případů:")
+    print("="*70)
+    print(gap_results.head(10).to_string(index=False))
+    
+    # Přidej statistiku do dataframe pro CSV export
+    gap_results.attrs['stats'] = {
+        'total_days': total_days,
+        'gap_up_days': gap_up_days,
+        'gap_down_days': total_days - gap_up_days,
+        'probability': point_est * 100,
+        'ci_lower': lower * 100,
+        'ci_upper': upper * 100,
+        'avg_gap': gap_results['Next_Gap_Percent'].mean(),
+        'median_gap': gap_results['Next_Gap_Percent'].median(),
+        'std_gap': gap_results['Next_Gap_Percent'].std(),
+        'avg_drop': gap_results['Drop_Return'].mean(),
+        'min_drop': gap_results['Drop_Return'].min(),
+        'max_drop': gap_results['Drop_Return'].max()
+    }
+    
+    return gap_results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Analýza pravděpodobnosti gap up po extrémních propadech QQQ'
@@ -487,9 +544,15 @@ def main():
     
     # Uložení výsledků
     if args.save and results_df is not None:
-        filename = f"qqq_gap_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        results_df.to_csv(filename, index=False)
-        print(f"\nVýsledky uloženy do: {filename}")
+        filename = export_results_to_csv(
+            results_df, 
+            threshold=args.threshold,
+            percentile=args.percentile,
+            years=args.years,
+            symbol=args.symbol
+        )
+        if filename:
+            print(f"\nVýsledky uloženy do: {filename}")
 
 
 if __name__ == '__main__':

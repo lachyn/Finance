@@ -1,8 +1,14 @@
 # QQQ Gap Analysis Project
 
-## Ignore patterns
+## Database
+market_data.db
+*.db
 
-# Python
+## Output files
+*.csv
+qqq_gap_analysis_*.csv
+
+## Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -27,14 +33,14 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
+## Virtual environments
 .venv/
 venv/
 ENV/
 env/
 .env
 
-# IDE
+## IDE
 .vscode/
 .idea/
 *.swp
@@ -42,14 +48,11 @@ env/
 *~
 .DS_Store
 
-# Output files
-*.csv
-qqq_gap_analysis_*.csv
+## OS
+.DS_Store
+Thumbs.db
 
-# Jupyter
+## Jupyter
 .ipynb_checkpoints/
 *.ipynb
 
-# OS
-.DS_Store
-Thumbs.db
